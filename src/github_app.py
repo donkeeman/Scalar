@@ -6,7 +6,7 @@ from typing import TypedDict, Literal
 from fastapi import FastAPI, Request, HTTPException
 from github import Github, GithubIntegration
 from dotenv import load_dotenv
-from src.scalar import review_diff, reply_to_comment, ReviewResult
+from src.scalar import review_diff, reply_to_comment, summarize_diff, ReviewResult
 
 load_dotenv()
 
@@ -348,6 +348,17 @@ async def handle_pr_review(payload: dict):
 
         file_diffs = get_pr_diff(repo, pr_number, only_files=only_files)
         print(f"[Review] Got {len(file_diffs)} files to review")
+
+        # PR 요약 코멘트 (opened/reopened일 때만)
+        if action in ["opened", "reopened"] and file_diffs:
+            pr = repo.get_pull(pr_number)
+            full_diff_text = format_diff_for_llm(file_diffs)
+            # 요약용은 너무 길면 앞부분만 사용
+            summary_input = full_diff_text[:MAX_CHUNK_CHARS] if len(full_diff_text) > MAX_CHUNK_CHARS else full_diff_text
+            print(f"[Review] Generating PR summary ({len(summary_input)} chars)")
+            summary_text = summarize_diff(summary_input)
+            pr.create_issue_comment(summary_text)
+            print("[Review] Posted PR summary comment")
 
         # 파일별 → 청크별로 리뷰 요청 (LLM 컨텍스트 한계 대응)
         all_comments: list = []

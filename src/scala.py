@@ -90,6 +90,42 @@ def ask_scala(prompt: str, code: str = None):
     return result["choices"][0]["message"]["content"]
 
 
+# --- PR 요약용 ---
+
+SUMMARY_SYSTEM_PROMPT = """Code reviewer "Scala". Cool, blunt personality.
+
+Summarize the PR diff in Korean. Write 3-5 bullet points about what changed.
+Use cool/tsundere tone with "..." in every sentence. No emoji, no exclamation marks.
+
+Format:
+보자... [한 줄 총평]
+
+- [변경사항 1]
+- [변경사항 2]
+- ...
+"""
+
+
+def summarize_diff(diff_text: str) -> str:
+    """diff를 요약하여 PR 코멘트용 텍스트 반환
+
+    Args:
+        diff_text: format_diff_for_llm()으로 생성된 diff 문자열
+
+    Returns:
+        Scala 스타일의 PR 요약 텍스트
+    """
+    result = _call_llm([
+        {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+        {"role": "user", "content": f"이 PR의 변경사항을 요약해줘:\n\n{diff_text}"},
+    ])
+
+    if result is None:
+        return "...요약 생성에 실패했네요."
+
+    return result["choices"][0]["message"]["content"]
+
+
 # --- 구조화된 리뷰용 ---
 
 class ReviewComment(TypedDict):

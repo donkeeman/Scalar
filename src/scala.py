@@ -112,6 +112,9 @@ Default: comments = []. Only add a comment when you find:
 2. Hardcoded secrets directly in code (e.g. password = "1234", api_key = "sk-xxx")
 3. Security vulnerabilities: SQL injection, command injection, path traversal
 
+Before reporting, check surrounding code for existing guards (if/else, try/except, null checks).
+If the issue is already handled nearby, do NOT report it.
+
 Do NOT comment on:
 - Suggestions, improvements, best practices
 - "might", "could", "consider" — if not 100% certain, skip

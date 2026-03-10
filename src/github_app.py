@@ -206,7 +206,22 @@ def chunk_diff_lines(file_diff: FileDiff, max_chars: int = MAX_CHUNK_CHARS) -> l
     return chunks
 
 
-def get_pr_diff(repo, pr_number: int) -> list[FileDiff]:
+def get_changed_files(repo, before: str, after: str) -> set[str]:
+    """두 커밋 사이에 변경된 파일 목록 조회
+
+    Args:
+        repo: PyGithub Repository 객체
+        before: 이전 커밋 SHA
+        after: 새 커밋 SHA
+
+    Returns:
+        변경된 파일 경로 set
+    """
+    comparison = repo.compare(before, after)
+    return {f.filename for f in comparison.files}
+
+
+def get_pr_diff(repo, pr_number: int, only_files: set[str] | None = None) -> list[FileDiff]:
     """PR의 diff를 파싱하여 구조화된 데이터로 반환 (소스 코드만)
 
     examples/, tests/ 등 리뷰가 불필요한 경로는 자동 제외
@@ -214,6 +229,7 @@ def get_pr_diff(repo, pr_number: int) -> list[FileDiff]:
     Args:
         repo: PyGithub Repository 객체
         pr_number: PR 번호
+        only_files: 지정 시 이 파일들만 포함 (증분 리뷰용)
 
     Returns:
         파일별 diff 정보 리스트
@@ -223,6 +239,10 @@ def get_pr_diff(repo, pr_number: int) -> list[FileDiff]:
 
     file_diffs: list[FileDiff] = []
     for file in files:
+        # 증분 리뷰: 변경된 파일만 포함
+        if only_files is not None and file.filename not in only_files:
+            continue
+
         # 제외 경로 필터링
         if any(file.filename.startswith(p) or f"/{p}" in file.filename for p in EXCLUDE_PATHS):
             continue
@@ -306,14 +326,27 @@ async def handle_pr_review(payload: dict):
     pr_number = pr_data["number"]
     repo_full_name = payload["repository"]["full_name"]
     installation_id = payload["installation"]["id"]
+    action = payload.get("action")
 
-    print(f"[Review] PR #{pr_number} on {repo_full_name}")
+    print(f"[Review] PR #{pr_number} on {repo_full_name} (action={action})")
 
     try:
         gh = get_github_client(installation_id)
         repo = gh.get_repo(repo_full_name)
 
-        file_diffs = get_pr_diff(repo, pr_number)
+        # synchronize: 변경된 파일만 리뷰 (증분)
+        only_files = None
+        if action == "synchronize":
+            before = payload.get("before")
+            after = payload.get("after")
+            if before and after:
+                only_files = get_changed_files(repo, before, after)
+                print(f"[Review] Incremental: {len(only_files)} files changed between {before[:7]}..{after[:7]}")
+                if not only_files:
+                    print("[Review] No files changed, skipping review")
+                    return {"status": "skipped", "reason": "no changed files"}
+
+        file_diffs = get_pr_diff(repo, pr_number, only_files=only_files)
         print(f"[Review] Got {len(file_diffs)} files to review")
 
         # 파일별 → 청크별로 리뷰 요청 (LLM 컨텍스트 한계 대응)

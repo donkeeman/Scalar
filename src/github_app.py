@@ -221,6 +221,29 @@ def get_changed_files(repo, before: str, after: str) -> set[str]:
     return {f.filename for f in comparison.files}
 
 
+def get_changed_lines(repo, before: str, after: str) -> dict[str, set[int]]:
+    """두 커밋 사이에 변경된 파일별 라인 번호 조회
+
+    Args:
+        repo: PyGithub Repository 객체
+        before: 이전 커밋 SHA
+        after: 새 커밋 SHA
+
+    Returns:
+        {파일경로: {변경된 라인 번호 set}} 딕셔너리
+    """
+    comparison = repo.compare(before, after)
+    changed: dict[str, set[int]] = {}
+    for f in comparison.files:
+        if f.patch:
+            lines = parse_patch(f.patch)
+            changed[f.filename] = {
+                l["line_number"] for l in lines
+                if l["line_number"] is not None and l["type"] == "add"
+            }
+    return changed
+
+
 def get_pr_diff(repo, pr_number: int, only_files: set[str] | None = None) -> list[FileDiff]:
     """PR의 diff를 파싱하여 구조화된 데이터로 반환 (소스 코드만)
 
@@ -334,7 +357,7 @@ async def handle_pr_review(payload: dict):
         gh = get_github_client(installation_id)
         repo = gh.get_repo(repo_full_name)
 
-        # synchronize: 변경된 파일만 리뷰 (증분)
+        # synchronize: 변경된 파일만 리뷰 (증분) + 해결된 코멘트 auto-resolve
         only_files = None
         if action == "synchronize":
             before = payload.get("before")
@@ -345,6 +368,18 @@ async def handle_pr_review(payload: dict):
                 if not only_files:
                     print("[Review] No files changed, skipping review")
                     return {"status": "skipped", "reason": "no changed files"}
+
+                # 변경된 라인에 있는 Scala 코멘트 auto-resolve
+                changed_lines = get_changed_lines(repo, before, after)
+                pr = repo.get_pull(pr_number)
+                token = get_installation_token(installation_id)
+                for comment in pr.get_review_comments():
+                    if comment.user.login != BOT_LOGIN:
+                        continue
+                    file_lines = changed_lines.get(comment.path)
+                    if file_lines and comment.line in file_lines:
+                        print(f"[Review] Auto-resolving: {comment.path}:{comment.line}")
+                        resolve_review_thread(token, comment.node_id)
 
         file_diffs = get_pr_diff(repo, pr_number, only_files=only_files)
         print(f"[Review] Got {len(file_diffs)} files to review")

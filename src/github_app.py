@@ -356,6 +356,7 @@ async def handle_pr_review(payload: dict):
     try:
         gh = get_github_client(installation_id)
         repo = gh.get_repo(repo_full_name)
+        pr = repo.get_pull(pr_number)
 
         # synchronize: 변경된 파일만 리뷰 (증분) + 해결된 코멘트 auto-resolve
         only_files = None
@@ -371,7 +372,6 @@ async def handle_pr_review(payload: dict):
 
                 # 변경된 라인에 있는 Scala 코멘트 auto-resolve
                 changed_lines = get_changed_lines(repo, before, after)
-                pr = repo.get_pull(pr_number)
                 token = get_installation_token(installation_id)
                 for comment in pr.get_review_comments():
                     if comment.user.login != BOT_LOGIN:
@@ -386,9 +386,7 @@ async def handle_pr_review(payload: dict):
 
         # PR 요약 코멘트 (opened/reopened일 때만)
         if action in ["opened", "reopened"] and file_diffs:
-            pr = repo.get_pull(pr_number)
             full_diff_text = format_diff_for_llm(file_diffs)
-            # 요약용은 너무 길면 앞부분만 사용
             summary_input = full_diff_text[:MAX_CHUNK_CHARS] if len(full_diff_text) > MAX_CHUNK_CHARS else full_diff_text
             print(f"[Review] Generating PR summary ({len(summary_input)} chars)")
             summary_text = summarize_diff(summary_input)

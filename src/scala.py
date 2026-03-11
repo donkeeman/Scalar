@@ -35,7 +35,7 @@ def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = 
     response = httpx.post(OLLAMA_URL, json=data, timeout=300.0)
     result = response.json()
 
-    if "error" in result or "choices" not in result:
+    if "error" in result or "choices" not in result or len(result["choices"]) == 0:
         return None
     return result
 

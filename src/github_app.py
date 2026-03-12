@@ -165,7 +165,16 @@ def format_diff_for_llm(file_diffs: list[FileDiff]) -> str:
     return output
 
 
-CODE_EXTENSIONS = {'.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.go', '.rs'}
+EXCLUDE_EXTENSIONS = {
+    '.md', '.txt', '.csv', '.json', '.yaml', '.yml', '.toml', '.xml', '.ini', '.cfg',
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.bmp',
+    '.woff', '.woff2', '.ttf', '.eot', '.otf',
+    '.mp3', '.mp4', '.wav', '.avi', '.mov', '.webm',
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.pptx',
+    '.zip', '.tar', '.gz', '.rar', '.7z',
+    '.exe', '.dll', '.so', '.dylib', '.bin', '.wasm',
+    '.map', '.lock', '.sum',
+}
 EXCLUDE_PATHS = {'examples/', 'tests/', 'test_', 'docs/', '__pycache__/'}
 MAX_CHUNK_CHARS = 6000
 
@@ -271,7 +280,7 @@ def get_pr_diff(repo, pr_number: int, only_files: set[str] | None = None) -> lis
             continue
 
         ext = '.' + file.filename.split('.')[-1] if '.' in file.filename else ''
-        if ext not in CODE_EXTENSIONS:
+        if ext in EXCLUDE_EXTENSIONS:
             continue
 
         if file.patch:
@@ -340,6 +349,7 @@ async def handle_webhook(request: Request):
     if event_type == "pull_request" and action in ["opened", "synchronize", "reopened"]:
         return await handle_pr_review(payload)
 
+    print(f"[Webhook] Ignored: event='{event_type}' action='{action}'")
     return {"status": "ignored", "reason": f"event '{event_type}' action '{action}' not handled"}
 
 

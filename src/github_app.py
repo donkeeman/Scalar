@@ -6,7 +6,7 @@ from typing import TypedDict, Literal
 from fastapi import FastAPI, Request, HTTPException
 from github import Github, GithubIntegration
 from dotenv import load_dotenv
-from src.scala import review_diff, reply_to_comment, ReviewResult
+from src.scalar import review_diff, reply_to_comment, ReviewResult
 
 load_dotenv()
 

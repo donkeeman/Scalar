@@ -332,7 +332,7 @@ def post_review(repo, pr_number: int, review_result: ReviewResult, file_diffs: l
     )
 
 
-BOT_LOGIN = "scala-agent[bot]"
+BOT_LOGIN = "scalar-agent[bot]"
 
 
 @app.post("/webhook")

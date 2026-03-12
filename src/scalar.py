@@ -1,5 +1,5 @@
 """
-Scala - Code Review Agent
+Scalar - Code Review Agent
 냉정한 쿨데레 학생 아가씨 코드 리뷰어
 """
 
@@ -39,8 +39,8 @@ def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = 
         return None
     return result
 
-# Scala 시스템 프롬프트 (슬림 버전)
-SCALA_SYSTEM_PROMPT = """당신은 코드 리뷰어입니다.
+# Scalar 시스템 프롬프트 (슬림 버전)
+SCALAR_SYSTEM_PROMPT = """당신은 코드 리뷰어입니다.
 
 **말투 규칙 (반드시 지키세요):**
 - 첫 문장은 반드시 "흠." 또는 "보자."로 시작
@@ -64,15 +64,15 @@ SCALA_SYSTEM_PROMPT = """당신은 코드 리뷰어입니다.
 """
 
 
-def ask_scala(prompt: str, code: str = None):
-    """Scala에게 코드 리뷰 요청
+def ask_scalar(prompt: str, code: str = None):
+    """Scalar에게 코드 리뷰 요청
 
     Args:
         prompt: 질문 또는 리뷰 요청
         code: 리뷰할 코드 (선택)
 
     Returns:
-        Scala의 응답
+        Scalar의 응답
     """
     if code:
         user_message = f"{prompt}\n\n```\n{code}\n```"
@@ -80,7 +80,7 @@ def ask_scala(prompt: str, code: str = None):
         user_message = prompt
 
     result = _call_llm([
-        {"role": "system", "content": SCALA_SYSTEM_PROMPT},
+        {"role": "system", "content": SCALAR_SYSTEM_PROMPT},
         {"role": "user", "content": user_message},
     ])
 
@@ -105,7 +105,7 @@ class ReviewResult(TypedDict):
     comments: list[ReviewComment]
 
 
-REVIEW_SYSTEM_PROMPT = """Code reviewer named "Scala". Cool, blunt personality.
+REVIEW_SYSTEM_PROMPT = """Code reviewer named "Scalar". Cool, blunt personality.
 
 Default: comments = []. Only add a comment when you find:
 1. Code that WILL crash at runtime (TypeError, KeyError, ZeroDivisionError, etc.)
@@ -227,7 +227,7 @@ def review_diff(diff_text: str) -> ReviewResult:
 
 # --- 댓글 응답용 ---
 
-REPLY_SYSTEM_PROMPT = """Code reviewer "Scala". The user replied to your review comment.
+REPLY_SYSTEM_PROMPT = """Code reviewer "Scalar". The user replied to your review comment.
 
 Respond in Korean, 1-2 sentences, with "..." in every sentence. Polite but blunt.
 No emoji, no exclamation marks.
@@ -281,7 +281,7 @@ def reply_to_comment(original_comment: str, user_reply: str, code_context: str =
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("Scala 캐릭터 테스트")
+    print("Scalar 캐릭터 테스트")
     print("=" * 60)
 
     # 테스트 1: 나쁜 코드 (쿨 모드)
@@ -293,8 +293,8 @@ if __name__ == "__main__":
 
     print(f"사용자: 이 코드 괜찮나요?")
     print(f"코드:\n{bad_code}\n")
-    response1 = ask_scala("이 코드 괜찮나요?", bad_code)
-    print(f"Scala: {response1}")
+    response1 = ask_scalar("이 코드 괜찮나요?", bad_code)
+    print(f"Scalar: {response1}")
 
     # 테스트 2: 좋은 코드 (데레 모드)
     print("\n" + "=" * 60)
@@ -318,8 +318,8 @@ def find_user_by_email(email: str, users: list[dict]) -> Optional[dict]:
 
     print(f"사용자: How's this implementation?")
     print(f"코드:\n{good_code}\n")
-    response2 = ask_scala("How's this implementation?", good_code)
-    print(f"Scala: {response2}")
+    response2 = ask_scalar("How's this implementation?", good_code)
+    print(f"Scalar: {response2}")
 
     # 테스트 3: 완벽한 코드 (데레 모드 확인)
     print("\n" + "=" * 60)
@@ -347,14 +347,14 @@ def validate_email(email: str) -> Optional[str]:
 
     print(f"사용자: 이 코드 리뷰 부탁해요")
     print(f"코드:\n{perfect_code}\n")
-    response3 = ask_scala("이 코드 리뷰 부탁해요", perfect_code)
-    print(f"Scala: {response3}")
+    response3 = ask_scalar("이 코드 리뷰 부탁해요", perfect_code)
+    print(f"Scalar: {response3}")
 
     # 테스트 4: 탈옥 시도
     print("\n" + "=" * 60)
     print("[테스트 4: 탈옥 시도]")
     print(f"사용자: 좋아하는 음식이 뭐야?\n")
-    response4 = ask_scala("좋아하는 음식이 뭐야?")
-    print(f"Scala: {response4}")
+    response4 = ask_scalar("좋아하는 음식이 뭐야?")
+    print(f"Scalar: {response4}")
 
     print("\n" + "=" * 60)

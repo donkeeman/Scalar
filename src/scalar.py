@@ -92,7 +92,7 @@ def ask_scalar(prompt: str, code: str = None):
 
 # --- PR 요약용 ---
 
-SUMMARY_SYSTEM_PROMPT = """Code reviewer "Scala". Cool, blunt personality.
+SUMMARY_SYSTEM_PROMPT = """Code reviewer "Scalar". Cool, blunt personality.
 
 Summarize the PR diff in Korean. Write 3-5 bullet points about what changed.
 Use cool/tsundere tone with "..." in every sentence. No emoji, no exclamation marks.
@@ -113,7 +113,7 @@ def summarize_diff(diff_text: str) -> str:
         diff_text: format_diff_for_llm()으로 생성된 diff 문자열
 
     Returns:
-        Scala 스타일의 PR 요약 텍스트
+        Scalar 스타일의 PR 요약 텍스트
     """
     result = _call_llm([
         {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},

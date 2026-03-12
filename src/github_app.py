@@ -370,14 +370,12 @@ async def handle_pr_review(payload: dict):
                     print("[Review] No files changed, skipping review")
                     return {"status": "skipped", "reason": "no changed files"}
 
-                # 변경된 라인에 있는 Scala 코멘트 auto-resolve
+                # 변경된 라인에 있는 Scalar 코멘트 auto-resolve
                 changed_lines = get_changed_lines(repo, before, after)
-                print(f"[Review] Changed lines: {changed_lines}")
                 token = get_installation_token(installation_id)
                 for comment in pr.get_review_comments():
                     if comment.user.login != BOT_LOGIN:
                         continue
-                    print(f"[Review] Checking comment: {comment.path}:{comment.line}")
                     file_lines = changed_lines.get(comment.path)
                     if file_lines and comment.line in file_lines:
                         print(f"[Review] Auto-resolving: {comment.path}:{comment.line}")
@@ -496,7 +494,7 @@ async def handle_comment_reply(payload: dict):
 @app.get("/")
 async def root():
     """Health check"""
-    return {"status": "ok", "message": "Scala Code Review Bot"}
+    return {"status": "ok", "message": "Scalar Code Review Bot"}
 
 
 if __name__ == "__main__":

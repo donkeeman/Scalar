@@ -1,4 +1,4 @@
-# Scala
+# Scalar
 
 > Submit a PR, and I'll review it for you. ...It's not like I want to or anything. It's just my job.
 > It runs locally, so your code won't be sent anywhere. You can relax.

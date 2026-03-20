@@ -36,6 +36,7 @@ def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = 
     result = response.json()
 
     if "error" in result or "choices" not in result or len(result["choices"]) == 0:
+        print(f"[LLM] Error: {result.get('error', 'no choices')}")
         return None
     return result
 
@@ -119,10 +120,14 @@ def summarize_diff(diff_text: str) -> str:
     Returns:
         Scalar 스타일의 PR 요약 텍스트
     """
-    result = _call_llm([
-        {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-        {"role": "user", "content": f"이 PR의 변경사항을 요약해줘:\n\n{diff_text}"},
-    ])
+    try:
+        result = _call_llm([
+            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": f"이 PR의 변경사항을 요약해줘:\n\n{diff_text}"},
+        ])
+    except Exception as e:
+        print(f"[Summary] Exception: {e}")
+        return "...요약 생성에 실패했네요."
 
     if result is None:
         return "...요약 생성에 실패했네요."

@@ -3,27 +3,31 @@ Scalar - Code Review Agent
 냉정한 쿨데레 학생 아가씨 코드 리뷰어
 """
 
+import os
+import subprocess
+import tempfile
 import httpx
 import json
 import re
 from typing import TypedDict
 
+from dotenv import load_dotenv
+load_dotenv()
 
+# LLM 백엔드 설정: "codex" | "ollama" | "openrouter"
+LLM_BACKEND = os.getenv("LLM_BACKEND", "ollama")
+
+# Ollama 설정
 OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
-OLLAMA_MODEL = "qwen2.5-coder:14b"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b")
+
+# OpenRouter 설정
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 
 
-def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = False) -> dict | None:
-    """Ollama API 호출 공통 함수
-
-    Args:
-        messages: 대화 메시지 리스트
-        temperature: 생성 온도
-        json_mode: JSON 응답 강제 여부
-
-    Returns:
-        API 응답 dict, 실패 시 None
-    """
+def _call_llm_ollama(messages: list[dict], temperature: float, json_mode: bool) -> dict | None:
+    """Ollama API 호출"""
     data: dict = {
         "model": OLLAMA_MODEL,
         "messages": messages,
@@ -36,9 +40,96 @@ def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = 
     result = response.json()
 
     if "error" in result or "choices" not in result or len(result["choices"]) == 0:
-        print(f"[LLM] Error: {result.get('error', 'no choices')}")
+        print(f"[LLM] Ollama error: {result.get('error', 'no choices')}")
         return None
     return result
+
+
+def _call_llm_codex(messages: list[dict], temperature: float, json_mode: bool) -> dict | None:
+    """Codex CLI를 통한 LLM 호출"""
+    # messages를 단일 프롬프트로 합치기
+    prompt = ""
+    for msg in messages:
+        if msg["role"] == "system":
+            prompt += msg["content"] + "\n\n"
+        elif msg["role"] == "user":
+            prompt += msg["content"]
+
+    try:
+        result = subprocess.run(
+            ["codex", "exec", "-o", "-", "-"],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env={**os.environ, "CLAUDE_CODE_GIT_BASH_PATH": r"D:\Program Files\Git\usr\bin\bash.exe"},
+        )
+        content = result.stdout.strip()
+        if not content:
+            print(f"[LLM] Codex empty output. stderr: {result.stderr[:200]}")
+            return None
+
+        # OpenAI API 호환 형식으로 래핑
+        return {
+            "choices": [{"message": {"content": content}}]
+        }
+    except subprocess.TimeoutExpired:
+        print("[LLM] Codex timeout")
+        return None
+    except Exception as e:
+        print(f"[LLM] Codex error: {e}")
+        return None
+
+
+def _call_llm_openrouter(messages: list[dict], temperature: float, json_mode: bool) -> dict | None:
+    """OpenRouter API 호출"""
+    data: dict = {
+        "model": OPENROUTER_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    if json_mode:
+        data["response_format"] = {"type": "json_object"}
+
+    response = httpx.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+        json=data,
+        timeout=60.0,
+    )
+    result = response.json()
+
+    if "error" in result or "choices" not in result or len(result["choices"]) == 0:
+        print(f"[LLM] OpenRouter error: {result.get('error', 'no choices')}")
+        return None
+    return result
+
+
+_LLM_BACKENDS = {
+    "ollama": _call_llm_ollama,
+    "codex": _call_llm_codex,
+    "openrouter": _call_llm_openrouter,
+}
+
+
+def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = False) -> dict | None:
+    """LLM 호출 공통 함수 — 백엔드는 LLM_BACKEND 환경변수로 전환
+
+    Args:
+        messages: 대화 메시지 리스트
+        temperature: 생성 온도
+        json_mode: JSON 응답 강제 여부
+
+    Returns:
+        API 응답 dict, 실패 시 None
+    """
+    backend_fn = _LLM_BACKENDS.get(LLM_BACKEND)
+    if not backend_fn:
+        print(f"[LLM] Unknown backend: {LLM_BACKEND}")
+        return None
+
+    print(f"[LLM] Using {LLM_BACKEND}")
+    return backend_fn(messages, temperature, json_mode)
 
 # Scalar 시스템 프롬프트 (슬림 버전)
 SCALAR_SYSTEM_PROMPT = """당신은 코드 리뷰어입니다.

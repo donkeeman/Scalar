@@ -62,7 +62,9 @@ def _call_llm_codex(messages: list[dict], temperature: float, json_mode: bool) -
             capture_output=True,
             text=True,
             timeout=300,
-            env={**os.environ, "CLAUDE_CODE_GIT_BASH_PATH": r"D:\Program Files\Git\usr\bin\bash.exe"},
+            shell=True,
+            encoding="utf-8",
+            env={**os.environ, "CLAUDE_CODE_GIT_BASH_PATH": r"D:\Program Files\Git\usr\bin\bash.exe", "PYTHONIOENCODING": "utf-8"},
         )
         content = result.stdout.strip()
         if not content:

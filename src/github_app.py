@@ -7,7 +7,7 @@ from typing import TypedDict, Literal
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from github import Github, GithubIntegration
 from dotenv import load_dotenv
-from src.scalar import review_diff, reply_to_comment, summarize_diff, ReviewResult
+from src.scalar import review_diff, reply_to_comment, summarize_diff, ReviewResult, LLM_BACKEND
 
 load_dotenv()
 
@@ -472,16 +472,26 @@ async def handle_pr_review(payload: dict):
             pr.create_issue_comment(summary_text)
             print("[Review] Posted PR summary comment")
 
-        # 파일별 → 청크별로 리뷰 요청 (LLM 컨텍스트 한계 대응)
+        # 파일별 리뷰 요청
         all_comments: list = []
-        for fd in file_diffs:
-            chunks = chunk_diff_lines(fd)
-            for i, chunk in enumerate(chunks):
-                diff_text = format_diff_for_llm([chunk])
-                chunk_label = f" (chunk {i+1}/{len(chunks)})" if len(chunks) > 1 else ""
-                print(f"[Review] Reviewing {fd['path']}{chunk_label} ({len(diff_text)} chars)")
-                result = review_diff(diff_text)
-                all_comments.extend(result["comments"])
+        use_chunking = LLM_BACKEND == "ollama"
+
+        if use_chunking:
+            # Ollama: 컨텍스트 한계로 청크 분할 필요
+            for fd in file_diffs:
+                chunks = chunk_diff_lines(fd)
+                for i, chunk in enumerate(chunks):
+                    diff_text = format_diff_for_llm([chunk])
+                    chunk_label = f" (chunk {i+1}/{len(chunks)})" if len(chunks) > 1 else ""
+                    print(f"[Review] Reviewing {fd['path']}{chunk_label} ({len(diff_text)} chars)")
+                    result = review_diff(diff_text)
+                    all_comments.extend(result["comments"])
+        else:
+            # Codex/OpenRouter: 전체 diff를 한 번에 전송
+            full_diff = format_diff_for_llm(file_diffs)
+            print(f"[Review] Reviewing all files at once ({len(full_diff)} chars)")
+            result = review_diff(full_diff)
+            all_comments.extend(result["comments"])
 
         # 중복 코멘트 제거 (같은 파일에서 같은 body면 첫 번째만 유지)
         seen: set[str] = set()

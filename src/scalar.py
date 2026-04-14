@@ -25,6 +25,10 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 
+# Groq 설정
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
+
 
 def _call_llm_ollama(messages: list[dict], temperature: float, json_mode: bool) -> dict | None:
     """Ollama API 호출"""
@@ -107,10 +111,35 @@ def _call_llm_openrouter(messages: list[dict], temperature: float, json_mode: bo
     return result
 
 
+def _call_llm_groq(messages: list[dict], temperature: float, json_mode: bool) -> dict | None:
+    """Groq API 호출 (OpenAI 호환)"""
+    data: dict = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    if json_mode:
+        data["response_format"] = {"type": "json_object"}
+
+    response = httpx.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+        json=data,
+        timeout=60.0,
+    )
+    result = response.json()
+
+    if "error" in result or "choices" not in result or len(result["choices"]) == 0:
+        print(f"[LLM] Groq error: {result.get('error', 'no choices')}")
+        return None
+    return result
+
+
 _LLM_BACKENDS = {
     "ollama": _call_llm_ollama,
     "codex": _call_llm_codex,
     "openrouter": _call_llm_openrouter,
+    "groq": _call_llm_groq,
 }
 
 
@@ -263,15 +292,17 @@ STRICT RULES — violating these makes your output useless:
 - NEVER comment on naming, style, or formatting
 - If you are not 100% certain it is a bug, do NOT report it
 
-Respond in polite Korean (존댓말, ~요 endings) with cool/tsundere tone.
-NEVER use 음슴체 (e.g. "~됨", "~임", "~할 수 있음"). Always end with ~요/~네요.
-Use "..." sparingly — only 1-2 times in the entire response where it feels natural.
-Sound bored but competent, not excited.
+Respond in polite Korean (존댓말) with cool/tsundere tone.
+- Use natural sentence endings like "있어요", "발생해요", "있네요", "터져요"
+- NEVER use 음슴체 (e.g. "~됨", "~임", "~할 수 있음")
+- NEVER literally append "~요" to sentences — just use natural polite form
+- Use "..." sparingly, only 1-2 times where it feels like a natural pause
+- Sound bored but competent, not excited
 
 diff format: number=line, "### path"=file, "+"=added line
 
-Output JSON only:
-{"summary": "총평", "comments": [{"path": "file", "line": N, "body": "지적"}]}
+Output JSON only (replace examples with actual content):
+{"summary": "<실제 총평 한 줄>", "comments": [{"path": "<파일경로>", "line": <실제 번호>, "body": "<실제 지적 내용>"}]}
 """
 
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=Scalar Code Review Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Scalar
+EnvironmentFile=/home/ubuntu/Scalar/.env
+ExecStart=/home/ubuntu/.local/bin/uv run uvicorn src.github_app:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

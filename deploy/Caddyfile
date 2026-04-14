@@ -1,0 +1,15 @@
+scalar.duckdns.org {
+    reverse_proxy localhost:8000
+
+    # 보안 헤더
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+    }
+
+    # Webhook body 크기 제한 (GitHub 기본 25MB)
+    request_body {
+        max_size 30MB
+    }
+}

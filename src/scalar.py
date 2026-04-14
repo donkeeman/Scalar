@@ -59,6 +59,14 @@ def _call_llm_codex(messages: list[dict], temperature: float, json_mode: bool) -
         elif msg["role"] == "user":
             prompt += msg["content"]
 
+    # Windows에서는 shell=True가 필요 (codex.cmd), Linux는 False
+    is_windows = os.name == "nt"
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    # Windows git-bash 경로 (선택)
+    bash_path = os.getenv("CLAUDE_CODE_GIT_BASH_PATH")
+    if bash_path:
+        env["CLAUDE_CODE_GIT_BASH_PATH"] = bash_path
+
     try:
         result = subprocess.run(
             ["codex", "exec", "-c", 'reasoning_effort="medium"', "-o", "-", "-"],
@@ -66,9 +74,9 @@ def _call_llm_codex(messages: list[dict], temperature: float, json_mode: bool) -
             capture_output=True,
             text=True,
             timeout=300,
-            shell=True,
+            shell=is_windows,
             encoding="utf-8",
-            env={**os.environ, "CLAUDE_CODE_GIT_BASH_PATH": r"D:\Program Files\Git\usr\bin\bash.exe", "PYTHONIOENCODING": "utf-8"},
+            env=env,
         )
         content = result.stdout.strip()
         if not content:

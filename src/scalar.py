@@ -125,6 +125,7 @@ def _call_llm_groq(messages: list[dict], temperature: float, json_mode: bool) ->
         "model": GROQ_MODEL,
         "messages": messages,
         "temperature": temperature,
+        "reasoning_format": "hidden",
     }
     if json_mode:
         data["response_format"] = {"type": "json_object"}
@@ -151,6 +152,19 @@ _LLM_BACKENDS = {
 }
 
 
+def _strip_thinking(content: str) -> str:
+    """thinking 모델의 내부 추론 토큰 제거
+
+    qwen3 등은 <think>...</think> 또는 자유 형식 추론을 응답에 섞어 출력.
+    reasoning_format=hidden이 안 먹히는 경우 대비한 후처리.
+    """
+    # <think>...</think> 태그 제거
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+    # <think>만 있고 닫는 태그 없으면 그 뒤부터 잘라내고 실제 응답만 남김
+    content = re.sub(r"^.*?</think>\s*", "", content, flags=re.DOTALL)
+    return content.strip()
+
+
 def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = False) -> dict | None:
     """LLM 호출 공통 함수 — 백엔드는 LLM_BACKEND 환경변수로 전환
 
@@ -168,7 +182,15 @@ def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = 
         return None
 
     print(f"[LLM] Using {LLM_BACKEND}")
-    return backend_fn(messages, temperature, json_mode)
+    result = backend_fn(messages, temperature, json_mode)
+
+    # thinking 토큰 제거 후처리
+    if result and "choices" in result and result["choices"]:
+        content = result["choices"][0].get("message", {}).get("content", "")
+        if content:
+            result["choices"][0]["message"]["content"] = _strip_thinking(content)
+
+    return result
 
 # Scalar 시스템 프롬프트 (슬림 버전)
 SCALAR_SYSTEM_PROMPT = """당신은 코드 리뷰어입니다.

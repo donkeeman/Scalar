@@ -3,6 +3,9 @@ Scalar - Code Review Agent
 냉정한 쿨데레 학생 아가씨 코드 리뷰어
 """
 
+import copy
+import functools
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -264,8 +267,12 @@ Format:
 """
 
 
+_SUMMARY_CACHE: dict[str, str] = {}
+_SUMMARY_CACHE_MAX = 128
+
+
 def summarize_diff(diff_text: str) -> str:
-    """diff를 요약하여 PR 코멘트용 텍스트 반환
+    """diff를 요약하여 PR 코멘트용 텍스트 반환 (성공 결과만 캐싱)
 
     Args:
         diff_text: format_diff_for_llm()으로 생성된 diff 문자열
@@ -273,6 +280,11 @@ def summarize_diff(diff_text: str) -> str:
     Returns:
         Scalar 스타일의 PR 요약 텍스트
     """
+    key = _cache_key("summary", diff_text)
+    if key in _SUMMARY_CACHE:
+        print(f"[summarize_diff] cache hit")
+        return _SUMMARY_CACHE[key]
+
     try:
         result = _call_llm([
             {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
@@ -285,7 +297,13 @@ def summarize_diff(diff_text: str) -> str:
     if result is None:
         return "...요약 생성에 실패했네요."
 
-    return result["choices"][0]["message"]["content"]
+    content = result["choices"][0]["message"]["content"]
+
+    # 성공만 캐시
+    if len(_SUMMARY_CACHE) >= _SUMMARY_CACHE_MAX:
+        _SUMMARY_CACHE.pop(next(iter(_SUMMARY_CACHE)))
+    _SUMMARY_CACHE[key] = content
+    return content
 
 
 # --- 구조화된 리뷰용 ---
@@ -388,8 +406,17 @@ def _is_valid_json_string(fragment: str) -> bool:
         return False
 
 
+_REVIEW_CACHE: dict[str, ReviewResult] = {}
+_REVIEW_CACHE_MAX = 128
+
+
+def _cache_key(*parts: str) -> str:
+    """문자열 조합을 해시하여 캐시 키 생성"""
+    return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
+
+
 def review_diff(diff_text: str, extra_instructions: str = "") -> ReviewResult:
-    """diff를 리뷰하여 구조화된 결과 반환
+    """diff를 리뷰하여 구조화된 결과 반환 (성공 결과만 캐싱)
 
     Args:
         diff_text: format_diff_for_llm()으로 생성된 diff 문자열
@@ -398,6 +425,11 @@ def review_diff(diff_text: str, extra_instructions: str = "") -> ReviewResult:
     Returns:
         summary와 인라인 comments가 포함된 ReviewResult
     """
+    key = _cache_key("review", diff_text, extra_instructions)
+    if key in _REVIEW_CACHE:
+        print(f"[review_diff] cache hit")
+        return copy.deepcopy(_REVIEW_CACHE[key])
+
     system_prompt = REVIEW_SYSTEM_PROMPT
     if extra_instructions:
         system_prompt += f"\n\n=== Repo-specific instructions ===\n{extra_instructions}"
@@ -415,11 +447,12 @@ def review_diff(diff_text: str, extra_instructions: str = "") -> ReviewResult:
         return {"summary": "...리뷰 생성에 실패했네요.", "comments": []}
 
     content = result["choices"][0]["message"]["content"]
+    parsed_result: ReviewResult | None = None
 
     # 1차 시도: 그대로 파싱
     try:
         parsed = json.loads(_extract_json(content))
-        return {
+        parsed_result = {
             "summary": parsed.get("summary", ""),
             "comments": parsed.get("comments", []),
         }
@@ -427,18 +460,24 @@ def review_diff(diff_text: str, extra_instructions: str = "") -> ReviewResult:
         pass
 
     # 2차 시도: 깨진 JSON 복구 후 파싱
-    try:
-        repaired = _repair_json(_extract_json(content))
-        parsed = json.loads(repaired)
-        print(f"[review_diff] JSON 복구 성공")
-        return {
-            "summary": parsed.get("summary", ""),
-            "comments": parsed.get("comments", []),
-        }
-    except json.JSONDecodeError:
-        print(f"[review_diff] JSON 파싱 최종 실패: {content[:200]}")
-        # raw JSON을 그대로 올리지 않음
-        return {"summary": "...리뷰를 생성했는데 형식이 깨졌네요. 다시 시도해주세요.", "comments": []}
+    if parsed_result is None:
+        try:
+            repaired = _repair_json(_extract_json(content))
+            parsed = json.loads(repaired)
+            print(f"[review_diff] JSON 복구 성공")
+            parsed_result = {
+                "summary": parsed.get("summary", ""),
+                "comments": parsed.get("comments", []),
+            }
+        except json.JSONDecodeError:
+            print(f"[review_diff] JSON 파싱 최종 실패: {content[:200]}")
+            return {"summary": "...리뷰를 생성했는데 형식이 깨졌네요. 다시 시도해주세요.", "comments": []}
+
+    # 성공 결과만 캐시에 저장 (LRU: 크기 초과 시 가장 오래된 것 제거)
+    if len(_REVIEW_CACHE) >= _REVIEW_CACHE_MAX:
+        _REVIEW_CACHE.pop(next(iter(_REVIEW_CACHE)))
+    _REVIEW_CACHE[key] = copy.deepcopy(parsed_result)
+    return parsed_result
 
 
 # --- 댓글 응답용 ---

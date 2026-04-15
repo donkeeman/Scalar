@@ -1,4 +1,4 @@
-scalar.duckdns.org {
+scalar-agent.duckdns.org {
     reverse_proxy localhost:8000
 
     # 보안 헤더

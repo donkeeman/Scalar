@@ -1,0 +1,31 @@
+# .scalar.yml 예시 — 레포 루트에 두면 Scalar가 자동으로 읽어들입니다.
+
+# 리뷰 언어 (현재는 ko만 사용, 미래 확장용)
+language: ko
+
+review:
+  # draft PR을 리뷰할지 여부 (기본: false)
+  drafts: false
+
+  # 제목에 이 키워드가 포함되면 리뷰를 스킵
+  ignore_title_keywords:
+    - WIP
+    - "[WIP]"
+    - do-not-merge
+
+  # 파일 경로 필터 (! prefix로 제외 패턴 지정)
+  # 예시: 빌드 산출물, 락 파일 등 제외
+  path_filters:
+    - "!dist/**"
+    - "!build/**"
+    - "!*.lock"
+    - "!package-lock.json"
+
+  # 경로별 추가 리뷰 지침 — 해당 경로에 매칭되는 파일 리뷰 시 LLM에 전달
+  path_instructions:
+    - path: "src/api/**"
+      instructions: "API 핸들러는 입력 검증과 인증 체크를 우선 확인"
+    - path: "src/db/**"
+      instructions: "SQL injection, 트랜잭션 누락, N+1 쿼리 중심으로"
+    - path: "**/*.test.js"
+      instructions: "테스트 파일은 리뷰하지 않음"  # path_filters로 !test/** 하는 게 더 낫긴 함

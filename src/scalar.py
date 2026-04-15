@@ -388,18 +388,23 @@ def _is_valid_json_string(fragment: str) -> bool:
         return False
 
 
-def review_diff(diff_text: str) -> ReviewResult:
+def review_diff(diff_text: str, extra_instructions: str = "") -> ReviewResult:
     """diff를 리뷰하여 구조화된 결과 반환
 
     Args:
         diff_text: format_diff_for_llm()으로 생성된 diff 문자열
+        extra_instructions: 레포 config의 경로별 추가 지침
 
     Returns:
         summary와 인라인 comments가 포함된 ReviewResult
     """
+    system_prompt = REVIEW_SYSTEM_PROMPT
+    if extra_instructions:
+        system_prompt += f"\n\n=== Repo-specific instructions ===\n{extra_instructions}"
+
     result = _call_llm(
         messages=[
-            {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"다음 PR의 코드 변경사항을 리뷰해줘:\n\n{diff_text}"},
         ],
         json_mode=True,

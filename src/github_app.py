@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from github import Github, GithubIntegration
 from dotenv import load_dotenv
 from src.scalar import review_diff, reply_to_comment, summarize_diff, ReviewResult, LLM_BACKEND
+from src.config import load_config, should_skip_by_title, matches_path_filter, get_path_instructions
 
 load_dotenv()
 
@@ -254,7 +255,12 @@ def get_changed_lines(repo, before: str, after: str) -> dict[str, set[int]]:
     return changed
 
 
-def get_pr_diff(repo, pr_number: int, only_files: set[str] | None = None) -> list[FileDiff]:
+def get_pr_diff(
+    repo,
+    pr_number: int,
+    only_files: set[str] | None = None,
+    path_filters: list[str] | None = None,
+) -> list[FileDiff]:
     """PR의 diff를 파싱하여 구조화된 데이터로 반환 (소스 코드만)
 
     examples/, tests/ 등 리뷰가 불필요한 경로는 자동 제외
@@ -263,6 +269,7 @@ def get_pr_diff(repo, pr_number: int, only_files: set[str] | None = None) -> lis
         repo: PyGithub Repository 객체
         pr_number: PR 번호
         only_files: 지정 시 이 파일들만 포함 (증분 리뷰용)
+        path_filters: .scalar.yml의 path_filters 목록
 
     Returns:
         파일별 diff 정보 리스트
@@ -276,12 +283,16 @@ def get_pr_diff(repo, pr_number: int, only_files: set[str] | None = None) -> lis
         if only_files is not None and file.filename not in only_files:
             continue
 
-        # 제외 경로 필터링
+        # 제외 경로 필터링 (기본)
         if any(file.filename.startswith(p) or f"/{p}" in file.filename for p in EXCLUDE_PATHS):
             continue
 
         ext = '.' + file.filename.split('.')[-1] if '.' in file.filename else ''
         if ext in EXCLUDE_EXTENSIONS:
+            continue
+
+        # 레포 config의 path_filters 적용
+        if path_filters and not matches_path_filter(file.filename, path_filters):
             continue
 
         if file.patch:
@@ -437,6 +448,19 @@ async def handle_pr_review(payload: dict):
         repo = gh.get_repo(repo_full_name)
         pr = repo.get_pull(pr_number)
 
+        # 레포 config 로드
+        config = load_config(repo)
+
+        # draft PR 스킵 체크
+        if pr_data.get("draft") and not config["drafts"]:
+            print(f"[Review] Skipping draft PR #{pr_number}")
+            return {"status": "skipped", "reason": "draft PR"}
+
+        # 제목 키워드 스킵 체크
+        if should_skip_by_title(pr_data.get("title", ""), config["ignore_title_keywords"]):
+            print(f"[Review] Skipping PR #{pr_number} by title keyword")
+            return {"status": "skipped", "reason": "title keyword matched"}
+
         # synchronize: 변경된 파일만 리뷰 (증분) + 해결된 코멘트 auto-resolve
         only_files = None
         if action == "synchronize":
@@ -460,7 +484,12 @@ async def handle_pr_review(payload: dict):
                         print(f"[Review] Auto-resolving: {comment.path}:{comment.line}")
                         resolve_review_thread(token, comment.node_id)
 
-        file_diffs = get_pr_diff(repo, pr_number, only_files=only_files)
+        file_diffs = get_pr_diff(
+            repo,
+            pr_number,
+            only_files=only_files,
+            path_filters=config["path_filters"],
+        )
         print(f"[Review] Got {len(file_diffs)} files to review")
 
         # PR 요약 코멘트 (opened/reopened일 때만)
@@ -478,6 +507,14 @@ async def handle_pr_review(payload: dict):
         if not file_diffs:
             print("[Review] No reviewable files, skipping LLM call")
         else:
+            # 경로별 지침을 파일-지침 매핑으로 취합
+            per_file_instructions: list[str] = []
+            for fd in file_diffs:
+                matched = get_path_instructions(fd["path"], config["path_instructions"])
+                if matched:
+                    per_file_instructions.append(f"{fd['path']}:\n  - " + "\n  - ".join(matched))
+            extra = "\n".join(per_file_instructions)
+
             use_chunking = LLM_BACKEND == "ollama"
 
             if use_chunking:
@@ -488,13 +525,14 @@ async def handle_pr_review(payload: dict):
                         diff_text = format_diff_for_llm([chunk])
                         chunk_label = f" (chunk {i+1}/{len(chunks)})" if len(chunks) > 1 else ""
                         print(f"[Review] Reviewing {fd['path']}{chunk_label} ({len(diff_text)} chars)")
-                        result = review_diff(diff_text)
+                        file_extra = "\n".join(get_path_instructions(fd["path"], config["path_instructions"]))
+                        result = review_diff(diff_text, extra_instructions=file_extra)
                         all_comments.extend(result["comments"])
             else:
                 # Codex/OpenRouter/Groq: 전체 diff를 한 번에 전송
                 full_diff = format_diff_for_llm(file_diffs)
                 print(f"[Review] Reviewing all files at once ({len(full_diff)} chars)")
-                result = review_diff(full_diff)
+                result = review_diff(full_diff, extra_instructions=extra)
                 all_comments.extend(result["comments"])
 
         # 중복 코멘트 제거 (같은 파일에서 같은 body면 첫 번째만 유지)

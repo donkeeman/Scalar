@@ -25,6 +25,10 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 
+# Groq 설정
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
+
 
 def _call_llm_ollama(messages: list[dict], temperature: float, json_mode: bool) -> dict | None:
     """Ollama API 호출"""
@@ -55,6 +59,14 @@ def _call_llm_codex(messages: list[dict], temperature: float, json_mode: bool) -
         elif msg["role"] == "user":
             prompt += msg["content"]
 
+    # Windows에서는 shell=True가 필요 (codex.cmd), Linux는 False
+    is_windows = os.name == "nt"
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    # Windows git-bash 경로 (선택)
+    bash_path = os.getenv("CLAUDE_CODE_GIT_BASH_PATH")
+    if bash_path:
+        env["CLAUDE_CODE_GIT_BASH_PATH"] = bash_path
+
     try:
         result = subprocess.run(
             ["codex", "exec", "-c", 'reasoning_effort="medium"', "-o", "-", "-"],
@@ -62,9 +74,9 @@ def _call_llm_codex(messages: list[dict], temperature: float, json_mode: bool) -
             capture_output=True,
             text=True,
             timeout=300,
-            shell=True,
+            shell=is_windows,
             encoding="utf-8",
-            env={**os.environ, "CLAUDE_CODE_GIT_BASH_PATH": r"D:\Program Files\Git\usr\bin\bash.exe", "PYTHONIOENCODING": "utf-8"},
+            env=env,
         )
         content = result.stdout.strip()
         if not content:
@@ -107,11 +119,50 @@ def _call_llm_openrouter(messages: list[dict], temperature: float, json_mode: bo
     return result
 
 
+def _call_llm_groq(messages: list[dict], temperature: float, json_mode: bool) -> dict | None:
+    """Groq API 호출 (OpenAI 호환)"""
+    data: dict = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+        "reasoning_format": "hidden",
+    }
+    if json_mode:
+        data["response_format"] = {"type": "json_object"}
+
+    response = httpx.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+        json=data,
+        timeout=60.0,
+    )
+    result = response.json()
+
+    if "error" in result or "choices" not in result or len(result["choices"]) == 0:
+        print(f"[LLM] Groq error: {result.get('error', 'no choices')}")
+        return None
+    return result
+
+
 _LLM_BACKENDS = {
     "ollama": _call_llm_ollama,
     "codex": _call_llm_codex,
     "openrouter": _call_llm_openrouter,
+    "groq": _call_llm_groq,
 }
+
+
+def _strip_thinking(content: str) -> str:
+    """thinking 모델의 내부 추론 토큰 제거
+
+    qwen3 등은 <think>...</think> 또는 자유 형식 추론을 응답에 섞어 출력.
+    reasoning_format=hidden이 안 먹히는 경우 대비한 후처리.
+    """
+    # <think>...</think> 태그 제거
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+    # <think>만 있고 닫는 태그 없으면 그 뒤부터 잘라내고 실제 응답만 남김
+    content = re.sub(r"^.*?</think>\s*", "", content, flags=re.DOTALL)
+    return content.strip()
 
 
 def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = False) -> dict | None:
@@ -131,7 +182,15 @@ def _call_llm(messages: list[dict], temperature: float = 0.7, json_mode: bool = 
         return None
 
     print(f"[LLM] Using {LLM_BACKEND}")
-    return backend_fn(messages, temperature, json_mode)
+    result = backend_fn(messages, temperature, json_mode)
+
+    # thinking 토큰 제거 후처리
+    if result and "choices" in result and result["choices"]:
+        content = result["choices"][0].get("message", {}).get("content", "")
+        if content:
+            result["choices"][0]["message"]["content"] = _strip_thinking(content)
+
+    return result
 
 # Scalar 시스템 프롬프트 (슬림 버전)
 SCALAR_SYSTEM_PROMPT = """당신은 코드 리뷰어입니다.
@@ -251,27 +310,35 @@ Default: comments = []. Only add a comment when you find:
 2. Hardcoded secrets directly in code (e.g. password = "1234", api_key = "sk-xxx")
 3. Security vulnerabilities: SQL injection, command injection, path traversal
 
-Before reporting, check surrounding code for existing guards (if/else, try/except, null checks).
-If the issue is already handled nearby, do NOT report it.
+Before reporting, verify ALL of these:
+1. Check surrounding code for existing guards (if/else, try/except, null checks). If handled nearby, skip.
+2. Read nearby comments. If a comment explains the intended behavior, do NOT flag that behavior as a bug.
+3. Describe the EXACT trigger: "When <specific input/condition> happens, this code crashes with <specific error>."
+   If you cannot state the trigger concretely, it is speculation. Skip it.
 
 STRICT RULES — violating these makes your output useless:
+- Only report issues you can prove WILL happen, not ones that "might" happen
+- Forbidden framings: "could cause", "may lead to", "might result in", "could be", "예상치 못한 동작", "예상치 못한"
 - NEVER suggest improvements, best practices, or "better" ways
 - NEVER use "might", "could", "consider", "~하는 게 좋을 것 같아", "~할 수 있어", "~할 수 있어요", "확인해보세요", "필요해요", "필요합니다"
 - NEVER comment on missing error handling, logging, or validation
 - NEVER comment on undefined/null possibilities that "could" happen — only actual guaranteed crashes
 - NEVER comment on environment variables, file paths, config patterns
 - NEVER comment on naming, style, or formatting
+- NEVER comment on module-level state or global variables unless you can prove concurrent access causes a guaranteed race condition
 - If you are not 100% certain it is a bug, do NOT report it
 
-Respond in polite Korean (존댓말, ~요 endings) with cool/tsundere tone.
-NEVER use 음슴체 (e.g. "~됨", "~임", "~할 수 있음"). Always end with ~요/~네요.
-Use "..." sparingly — only 1-2 times in the entire response where it feels natural.
-Sound bored but competent, not excited.
+Respond in polite Korean (존댓말) with cool/tsundere tone.
+- Use natural sentence endings like "있어요", "발생해요", "있네요", "터져요"
+- NEVER use 음슴체 (e.g. "~됨", "~임", "~할 수 있음")
+- NEVER literally append "~요" to sentences — just use natural polite form
+- Use "..." sparingly, only 1-2 times where it feels like a natural pause
+- Sound bored but competent, not excited
 
 diff format: number=line, "### path"=file, "+"=added line
 
-Output JSON only:
-{"summary": "총평", "comments": [{"path": "file", "line": N, "body": "지적"}]}
+Output JSON only (replace examples with actual content):
+{"summary": "<실제 총평 한 줄>", "comments": [{"path": "<파일경로>", "line": <실제 번호>, "body": "<실제 지적 내용>"}]}
 """
 
 

@@ -62,6 +62,9 @@ build/
 *.sqlite
 *.sqlite3
 
+# ChromaDB (RAG memory)
+.chroma/
+
 # Claude Code
 .claude/
 CLAUDE.md

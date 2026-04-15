@@ -9,6 +9,7 @@ from github import Github, GithubIntegration
 from dotenv import load_dotenv
 from src.scalar import review_diff, reply_to_comment, summarize_diff, ReviewResult, LLM_BACKEND
 from src.config import load_config, should_skip_by_title, matches_path_filter, get_path_instructions
+from src.rag import store_rejection, retrieve_similar, format_for_prompt
 
 load_dotenv()
 
@@ -515,6 +516,17 @@ async def handle_pr_review(payload: dict):
                     per_file_instructions.append(f"{fd['path']}:\n  - " + "\n  - ".join(matched))
             extra = "\n".join(per_file_instructions)
 
+            # RAG: 유사 오탐 검색하여 프롬프트에 주입
+            try:
+                full_diff_for_search = format_diff_for_llm(file_diffs)
+                similar = retrieve_similar(full_diff_for_search, n=3)
+                if similar:
+                    rag_context = format_for_prompt(similar)
+                    extra = f"{extra}\n\n{rag_context}" if extra else rag_context
+                    print(f"[Review] RAG: injected {len(similar)} past false positives")
+            except Exception as e:
+                print(f"[Review] RAG retrieve failed: {e}")
+
             use_chunking = LLM_BACKEND == "ollama"
 
             if use_chunking:
@@ -609,11 +621,23 @@ async def handle_comment_reply(payload: dict):
         pr.create_review_comment_reply(parent_comment_id, result["reply"])
         print(f"[Reply] Posted reply")
 
-        # 스칼라가 인정했으면 스레드 자동 resolve
+        # 스칼라가 인정했으면 스레드 자동 resolve + 오탐으로 기억
         if result["should_resolve"]:
             token = get_installation_token(installation_id)
             resolve_review_thread(token, comment["node_id"])
             print(f"[Reply] Thread resolved")
+
+            # RAG: 오탐 패턴 저장
+            try:
+                store_rejection(
+                    comment_body=parent_comment.body,
+                    code_context=parent_comment.diff_hunk or "",
+                    repo=repo_full_name,
+                    pr_number=pr_number,
+                    comment_id=str(parent_comment_id),
+                )
+            except Exception as e:
+                print(f"[Reply] RAG store failed: {e}")
 
         return {"status": "success", "reply_to": parent_comment_id}
 
